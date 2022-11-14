@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 from tools.exceptions.messages import MessageError, MessageValueError
 from tools.messages import AbstractResultMessage
 
+
 class CarMetaDataMessage(AbstractResultMessage):
     CLASS_MESSAGE_TYPE = "CarMetaData"
     MESSAGE_TYPE_CHECK = True
