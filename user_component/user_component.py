@@ -274,3 +274,84 @@ class UserComponent(AbstractSimulationComponent):
             log_exception(message_error)
             await self.send_error_message("Internal error when creating result message.")
 
+def create_component() -> UserComponent:
+    """
+    TODO: add proper description specific for this component.
+    """
+
+    # Read the parameters for the component from the environment variables.
+    environment_variables = load_environmental_variables(
+        (USER_ID, int, 0),   
+        (USER_NAME, str, ""),
+        (STATION_ID, int, 0),
+        (STATE_OF_CHARGE, float, 0.0),
+        (CAR_BATTERY_CAPACITY, float, 0.0),
+        (CAR_MODEL, str, ""),
+        (CAR_MAX_POWER, float, 0.0),
+        (TARGET_STATE_OF_CHARGE, float, 0.0),
+        (TARGET_TIME, str, ""),
+        (INPUT_COMPONENTS, str, ""),  # the comma-separated list of component names that provide input
+        (OUTPUT_DELAY, float, 0.0)    # delay in seconds before sending the result message for the epoch
+    )
+
+
+    # The cast function here is only used to help Python linters like pyright to recognize the proper type.
+    # They are not necessary and can be omitted.
+    user_id = cast(int, environment_variables[USER_ID])
+    user_name = cast(str, environment_variables[USER_NAME])
+    station_id = cast(int, environment_variables[STATION_ID])
+    state_of_charge = cast(float, environment_variables[STATE_OF_CHARGE])
+    car_battery_capacity = cast(float, environment_variables[CAR_BATTERY_CAPACITY])
+    car_model = cast(str, environment_variables[CAR_MODEL])
+    car_max_power = cast(str, environment_variables[CAR_MAX_POWER])
+    target_state_of_charge = cast(str, environment_variables[TARGET_STATE_OF_CHARGE])
+    target_time = cast(str, environment_variables[TARGET_TIME])
+
+    # put the input components to a set, only consider component with non-empty names
+    input_components = {
+        input_component
+        for input_component in cast(str, environment_variables[INPUT_COMPONENTS]).split(",")
+        if input_component
+    }
+    output_delay = cast(float, environment_variables[OUTPUT_DELAY])
+
+    # Create and return a new SimpleComponent object using the values from the environment variables
+    return UserComponent(
+        user_id = user_id,
+        user_name = user_name,
+        station_id = station_id,
+        state_of_charge = state_of_charge,
+        car_battery_capacity = car_battery_capacity,
+        car_model = car_model,
+        car_max_power = car_max_power,
+        target_state_of_charge = ctarget_state_of_charge,
+        target_time = target_time
+    )
+
+async def start_component():
+    """
+    Creates and starts a UserComponent component.
+    """
+    # A general exception handler that should catch any unhandled error that would otherwise crash the program.
+    # Having this might be especially useful when testing components in large simulations and some component(s)
+    # crash without giving any output.
+    #
+    # Note, that any exceptions thrown in async functions will not be caught here.
+    # Instead they should get logged as warnings but otherwise should not crash the component.
+    try:
+        user_component = create_component()
+
+        # The component will only start listening to the message bus once the start() method has been called.
+        await user_component.start()
+
+        # Wait in the loop until the component has stopped itself.
+        while not user_component.is_stopped:
+            await asyncio.sleep(TIMEOUT)
+
+    except BaseException as error:  # pylint: disable=broad-except
+        log_exception(error)
+        LOGGER.info("Component will now exit.")
+
+
+if __name__ == "__main__":
+    asyncio.run(start_component())
