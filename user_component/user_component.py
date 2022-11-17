@@ -92,5 +92,185 @@ class UserComponent(AbstractSimulationComponent):
             (CAR_METADATA_TOPIC, str, "CarMetadataTopic")
         )
 
+        self._user_state_topic_base = cast(str, environment[USER_STATE_TOPIC])
+        self._user_state_topic_output = ".".join([self._user_state_topic_base, self.component_name])
+
+        self._car_state_topic_base = cast(str, environment[CAR_STATE_TOPIC])
+        self._car_state_topic_output = ".".join([self._car_state_topic_base, self.component_name])
+
+        self._car_metadata_topic_base = cast(str, environment[CAR_METADATA_TOPIC])
+        self._car_metadata_topic_output = ".".join([self._car_metadata_topic_base, self.component_name])     
+
+        # The easiest way to ensure that the component will listen to all necessary topics
+        # is to set the self._other_topics variable with the list of the topics to listen to.
+        # Note, that the "SimState" and "Epoch" topic listeners are added automatically by the parent class.
+        self._other_topics = [
+            ".".join([self._user_state_topic_base, self._car_state_topic_base, self._car_metadata_topic_base , other_component_name])
+            for other_component_name in self._input_components
+        ]
+
+        # The base class contains several variables that can be used in the child class.
+        # The variable list below is not an exhaustive list but contains the most useful variables.
+
+        # Variables that should only be READ in the child class:
+        # - self.simulation_id               the simulation id
+        # - self.component_name              the component name
+        # - self._simulation_state           either "running" or "stopped"
+        # - self._latest_epoch               epoch number for the current epoch
+        # - self._completed_epoch            epoch number for the latest epoch that has been completed
+        # - self._latest_epoch_message       the latest epoch message as EpochMessage object
+
+        # Variable for the triggering message ids where all relevant message ids should be appended.
+        # The list is automatically cleared at the start of each epoch.
+        # - self._triggering_message_ids
+
+        # MessageGenerator object that can be used to generate the message objects:
+        # - self._message_generator
+
+        # RabbitmqClient object for communicating with the message bus:
+        # - self._rabbitmq_client
+
+    def clear_epoch_variables(self) -> None:
+        """Clears all the variables that are used to store information about the received input within the
+           current epoch. This method is called automatically after receiving an epoch message for a new epoch.
+           NOTE: this method should be overwritten in any child class that uses epoch specific variables
+        """
+        self._current_input_components = set()
+
+    async def process_epoch(self) -> bool:
+        """
+        Process the epoch and do all the required calculations.
+        Assumes that all the required information for processing the epoch is available.
+        Returns False, if processing the current epoch was not yet possible.
+        Otherwise, returns True, which indicates that the epoch processing was fully completed.
+        This also indicated that the component is ready to send a Status Ready message to the Simulation Manager.
+        NOTE: this method should be overwritten in any child class.
+        TODO: add proper description specific for this component.
+        """
+
+        # send the output message
+        await asyncio.sleep(self._output_delay)
+
+        ## Add the send message functions
+        await self._send_car_metadata_message()
+        await self._send_user_state_message()
+        await self._send_car_state_message()
+        # return True to indicate that the component is finished with the current epoch
+        return True
+
+
+    async def all_messages_received_for_epoch(self) -> bool:
+        """
+        Returns True, if all the messages required to start calculations for the current epoch have been received.
+        Checks only that all the required information is available.
+        Does not check any other conditions like the simulation state.
+        NOTE: this method should be overwritten in any child class that needs more
+        information than just the Epoch message.
+        TODO: add proper description specific for this component.
+        """
+        return self._input_components == self._current_input_components
+
+
+    async def general_message_handler(self, message_object: Union[BaseMessage, Any], message_routing_key: str) -> None:
+        """
+        Handles the incoming messages. message_routing_key is the topic for the message.
+        Assumes that the messages are not of type SimulationStateMessage or EpochMessage.
+        NOTE: this method should be overwritten in any child class that
+        listens to messages other than SimState or Epoch messages.
+        TODO: add proper description specific for this component.
         
         
+        """
+        # Replace by incoming station message
+        if isinstance(message_object, UserStateMessage):
+            # added extra cast to allow Pylance to recognize that message_object is an instance of UserStateMessage
+            message_object = cast(UserStateMessage, message_object)
+            # ignore simple messages from components that have not been registered as input components
+            if message_object.source_process_id not in self._input_components:
+                LOGGER.debug(f"Ignoring UserStateMessage from {message_object.source_process_id}")
+
+            # only take into account the first simple message from each component
+            elif message_object.source_process_id in self._current_input_components:
+                LOGGER.info(f"Ignoring new UserStateMessage from {message_object.source_process_id}")
+
+            else:
+                self._current_input_components.add(message_object.source_process_id)
+                LOGGER.debug(f"Received UserStateMessage from {message_object.source_process_id}")
+
+                self._triggering_message_ids.append(message_object.message_id)
+                if not await self.start_epoch():
+                    LOGGER.debug(f"Waiting for other input messages before processing epoch {self._latest_epoch}")
+
+        else:
+            LOGGER.debug("Received unknown message from {message_routing_key}: {message_object}")
+
+    async def _send_user_state_message(self):
+
+        try:
+            user_state_message = self._message_generator.get_message(
+                UserStateMessage,
+                EpochNumber=self._latest_epoch,
+                TriggeringMessageIds=self._triggering_message_ids,
+                UserId=self._user_id,
+                TargetStateOfCharge=self._target_state_of_charge,
+                TargetTime=self._target_time
+            )
+
+            await self._rabbitmq_client.send_message(
+                topic_name=self._user_state_topic_output,
+                message_bytes= user_state_message.bytes()
+            )
+
+        except (ValueError, TypeError, MessageError) as message_error:
+            # When there is an exception while creating the message, it is in most cases a serious error.
+            log_exception(message_error)
+            await self.send_error_message("Internal error when creating result message.")
+
+    async def _send_car_state_message(self):
+
+        try:
+            car_state_message = self._message_generator.get_message(
+                CarStateMessage,
+                EpochNumber=self._latest_epoch,
+                TriggeringMessageIds=self._triggering_message_ids,
+                UserId=self._user_id,
+                StationId=self._station_id,
+                StateOfCharge=self._state_of_charge
+            )
+
+            await self._rabbitmq_client.send_message(
+                topic_name=self._car_state_topic_output,
+                message_bytes= car_state_message.bytes()
+            )
+
+        except (ValueError, TypeError, MessageError) as message_error:
+            # When there is an exception while creating the message, it is in most cases a serious error.
+            log_exception(message_error)
+            await self.send_error_message("Internal error when creating result message.")
+
+    async def _send_car_metadata_message(self):
+
+        try:
+            car_metadata_message = self._message_generator.get_message(
+                CarMetaDataMessage,
+                EpochNumber=self._latest_epoch,
+                TriggeringMessageIds=self._triggering_message_ids,
+                UserId=self._user_id,
+                UserName=self._user_name,
+                StationId=self._station_id,
+                StateOfCharge=self._state_of_charge,
+                CarBatteryCapacity=self._car_battery_capacity,
+                CarModel=self._car_model,
+                CarMaxPower=self._car_max_power
+            )
+
+            await self._rabbitmq_client.send_message(
+                topic_name=self._car_metadata_topic_output,
+                message_bytes= car_metadata_message.bytes()
+            )
+
+        except (ValueError, TypeError, MessageError) as message_error:
+            # When there is an exception while creating the message, it is in most cases a serious error.
+            log_exception(message_error)
+            await self.send_error_message("Internal error when creating result message.")
+
