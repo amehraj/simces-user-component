@@ -32,7 +32,7 @@ OUTPUT_DELAY = "OUTPUT_DELAY"
 
 USER_STATE_TOPIC = "USER_STATE_TOPIC"
 CAR_STATE_TOPIC = "CAR_STATE_TOPIC"
-CAR_METADATA_TOPIC = "USER_STATE_TOPIC"
+CAR_METADATA_TOPIC = "CAR_METADATA_TOPIC"
 
 
 # time interval in seconds on how often to check whether the component is still running
@@ -51,7 +51,7 @@ class UserComponent(AbstractSimulationComponent):
         car_model: str,
         car_max_power: float,
         target_state_of_charge: float,
-        target_time: datetime,
+        target_time: str,
         input_components: Set[str],
         output_delay: float):
         
@@ -85,15 +85,15 @@ class UserComponent(AbstractSimulationComponent):
 
         # Load environmental variables for those parameters that were not given to the constructor.
         # In this template the used topics are set in this way with given default values as an example.
-
+        # fix topic names
         environment = load_environmental_variables(
-            (USER_STATE_TOPIC, str, "UserStateTopic"),
-            (CAR_STATE_TOPIC, str, "CarStateTopic"),
-            (CAR_METADATA_TOPIC, str, "CarMetadataTopic")
+            (USER_STATE_TOPIC, str, "User.UserState"),
+            (CAR_STATE_TOPIC, str, "User.CarState"),
+            (CAR_METADATA_TOPIC, str, "Init.User.CarMetadata")
         )
 
         self._user_state_topic_base = cast(str, environment[USER_STATE_TOPIC])
-        self._user_state_topic_output = ".".join([self._user_state_topic_base, self.component_name])
+        # self._user_state_topic_output = ".".join([self._user_state_topic_base, self.component_name])
 
         self._car_state_topic_base = cast(str, environment[CAR_STATE_TOPIC])
         self._car_state_topic_output = ".".join([self._car_state_topic_base, self.component_name])
@@ -104,9 +104,10 @@ class UserComponent(AbstractSimulationComponent):
         # The easiest way to ensure that the component will listen to all necessary topics
         # is to set the self._other_topics variable with the list of the topics to listen to.
         # Note, that the "SimState" and "Epoch" topic listeners are added automatically by the parent class.
+        
+        #recieve topic
         self._other_topics = [
-            ".".join([self._user_state_topic_base, self._car_state_topic_base, self._car_metadata_topic_base , other_component_name])
-            for other_component_name in self._input_components
+            "Station.PowerOutput"
         ]
 
         # The base class contains several variables that can be used in the child class.
@@ -151,10 +152,13 @@ class UserComponent(AbstractSimulationComponent):
         # send the output message
         await asyncio.sleep(self._output_delay)
 
+        # Modify with Conditions
         ## Add the send message functions
         await self._send_car_metadata_message()
         await self._send_user_state_message()
         await self._send_car_state_message()
+
+        #Modify
         # return True to indicate that the component is finished with the current epoch
         return True
 

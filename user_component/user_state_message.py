@@ -67,9 +67,8 @@ class UserStateMessage(AbstractResultMessage):
     def target_state_of_charge(self) -> float:
         return self.__target_state_of_charge
 
-    # Confirm Usage
     @property
-    def target_time(self) -> datetime:
+    def target_time(self) -> str:
         return self.__target_time  
 
     @user_id.setter
@@ -87,7 +86,7 @@ class UserStateMessage(AbstractResultMessage):
             raise MessageValueError(f"Invalid value for TargetStateOfCharge: {target_state_of_charge}")
 
     @target_time.setter
-    def target_time(self, target_time: datetime):
+    def target_time(self, target_time: str):
         if self._check_target_time(target_time):
             self.__target_time = target_time
         else:
@@ -111,8 +110,8 @@ class UserStateMessage(AbstractResultMessage):
         return isinstance(target_state_of_charge, float)
 
     @classmethod
-    def _check_target_time(cls, target_time: datetime) -> bool:
-        return isinstance(target_time, datetime)
+    def _check_target_time(cls, target_time: str) -> bool:
+        return isinstance(target_time, str)
 
     @classmethod
     def from_json(cls, json_message: Dict[str, Any]) -> Optional[UserStateMessage]:
